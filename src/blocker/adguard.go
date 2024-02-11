@@ -1,4 +1,4 @@
-package adguard
+package blocker
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 )
 
@@ -20,8 +21,21 @@ type Adguard struct {
 	blockingRule       string
 }
 
+type UpdateStatus int
+
+const (
+	Success UpdateStatus = iota
+	Fail
+)
+
+// https://github.com/AdguardTeam/AdGuardHome/tree/master/openapi
 func New(protocol string, address string, username string, password string) *Adguard {
 	adguardCredentials := fmt.Sprintf("%s:%s", username, password)
+
+	_, err := url.Parse(fmt.Sprintf("%s://%s", protocol, address))
+	if err != nil {
+		log.Fatalln("Invalid adguard URL")
+	}
 
 	return &Adguard{
 		Protocol:           protocol,
@@ -29,12 +43,12 @@ func New(protocol string, address string, username string, password string) *Adg
 		Credentials:        base64.StdEncoding.EncodeToString([]byte(adguardCredentials)),
 		filteringRulesPath: "/control/filtering/status",
 		setRulesPath:       "/control/filtering/set_rules",
-		blockingRule:       "||*^$client=", // Block every request from client provided after = sign
+		blockingRule:       "||*^$client=", // Block every request from client
 	}
 }
 
 func (a *Adguard) GetRules() []string {
-	adguardRulesUrl := fmt.Sprintf("%s://%s%s", a.Protocol, a.Address, a.filteringRulesPath) // TODO: consider using url.Parse and keep it as struct field
+	adguardRulesUrl := fmt.Sprintf("%s://%s%s", a.Protocol, a.Address, a.filteringRulesPath)
 	req, err := http.NewRequest("GET", adguardRulesUrl, nil)
 	if err != nil {
 		log.Fatalln(err)
@@ -93,7 +107,7 @@ func (a *Adguard) RemoveRule(tvAddress string) {
 	}
 }
 
-func (a *Adguard) UpdateRules(rules []string) {
+func (a *Adguard) UpdateRules(rules []string) UpdateStatus {
 	adguardSetRulesUrl := fmt.Sprintf("%s://%s%s", a.Protocol, a.Address, a.setRulesPath)
 	payload := &RulesPayload{
 		Rules: rules,
@@ -112,11 +126,15 @@ func (a *Adguard) UpdateRules(rules []string) {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		log.Fatalln(err)
+		log.Printf("Cannot update rules, something went wrong: %s", err)
 	}
 	defer resp.Body.Close()
 
-	//TODO: track status
+	if resp.StatusCode == 200 {
+		return Success
+	} else {
+		return Fail
+	}
 }
 
 type RulesResponse struct {

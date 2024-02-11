@@ -3,10 +3,10 @@ package main
 import (
 	"log"
 	"os"
-	"time"
+	"strconv"
 
-	"privacy-guard/src/adguard"
-	"privacy-guard/src/sony"
+	"privacy-guard/src/blocker"
+	"privacy-guard/src/tv"
 
 	"github.com/joho/godotenv"
 )
@@ -14,38 +14,19 @@ import (
 func main() {
 	log.Println("Privacy Guard started")
 	tvProtocol, tvAddress, tvPsk := getEnv("TV_PROTOCOL"), getEnv("TV_ADDRESS"), getEnv("TV_PSK")
-	adguardProtocol, adguardAddress, adguardUsername, adguardPassword :=
-		getEnv("ADGUARD_PROTOCOL"), getEnv("ADGUARD_ADDRESS"), getEnv("ADGUARD_USERNAME"), getEnv("ADGUARD_PASSWORD")
-	// interval := getEnv("INTERVAL")
+	adguardProtocol, adguardAddress := getEnv("ADGUARD_PROTOCOL"), getEnv("ADGUARD_ADDRESS")
+	adguardUsername, adguardPassword := getEnv("ADGUARD_USERNAME"), getEnv("ADGUARD_PASSWORD")
+	interval, err := strconv.Atoi(getEnv("INTERVAL"))
 
-	tv := sony.New(tvProtocol, tvAddress, tvPsk)
-	adguard := adguard.New(adguardProtocol, adguardAddress, adguardUsername, adguardPassword)
-
-	initialStatus := tv.GetStatus()
-	if initialStatus == "standby" {
-		adguard.SetRule(tvAddress)
-	} else {
-		adguard.RemoveRule(tvAddress)
+	if err != nil {
+		log.Fatalln("Interval value must be integer, setting defualt value (2 sec)")
+		interval = 2
 	}
 
-	previousStatus := initialStatus
-	for {
-		currentStatus := tv.GetStatus()
+	sonyTv := tv.New(tvProtocol, tvAddress, tvPsk)
+	adguard := blocker.New(adguardProtocol, adguardAddress, adguardUsername, adguardPassword)
 
-		if currentStatus != previousStatus {
-			log.Printf("TV status change: %s->%s \n", previousStatus, currentStatus)
-
-			if currentStatus == "standby" {
-				adguard.SetRule(tv.Address)
-			} else {
-				adguard.RemoveRule(tv.Address)
-			}
-
-			previousStatus = currentStatus
-		}
-
-		time.Sleep(2 * time.Second)
-	}
+	Watch(sonyTv, adguard, interval)
 }
 
 func getEnv(key string) string {
@@ -58,7 +39,7 @@ func getEnv(key string) string {
 	err := godotenv.Load(filename)
 
 	if err != nil {
-		log.Fatalf("Error loading %s file", filename)
+		log.Printf("Error loading %s file. \n", filename)
 	}
 
 	return os.Getenv(key)

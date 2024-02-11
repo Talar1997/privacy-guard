@@ -1,4 +1,4 @@
-package sony
+package tv
 
 import (
 	"bytes"
@@ -7,43 +7,49 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 )
 
-type TvStatusPayload struct {
+type SonyStatusPayload struct {
 	Method  string   `json:"method"`
 	Id      int      `json:"id"`
 	Params  []string `json:"params"`
 	Version string   `json:"version"`
 }
 
-type TvStatusResponse struct {
-	Id     int        `json:"id"`
-	Result []TvResult `json:"result"`
+type SonyStatusResponse struct {
+	Id     int          `json:"id"`
+	Result []SonyResult `json:"result"`
 }
 
-type TvResult struct {
+type SonyResult struct {
 	Status string `json:"status"`
 }
 
-type Tv struct {
+type SonyTv struct {
 	Protocol      string
 	Address       string
 	Psk           string
 	SystemPath    string
 	getStatusUrl  string
-	StatusPayload TvStatusPayload
+	StatusPayload SonyStatusPayload
 }
 
-func New(protocol string, address string, psk string) *Tv {
+func New(protocol string, address string, psk string) *SonyTv {
 	systemPath := "/sony/system"
 
-	return &Tv{
+	_, err := url.Parse(fmt.Sprintf("%s://%s", protocol, address))
+	if err != nil {
+		log.Fatalln("Invalid SonyTV URL")
+	}
+
+	return &SonyTv{
 		Protocol:     protocol,
 		Address:      address,
 		Psk:          psk,
 		SystemPath:   systemPath,
-		getStatusUrl: fmt.Sprintf("%s://%s%s", protocol, address, systemPath), // TODO: url.Parse
-		StatusPayload: TvStatusPayload{
+		getStatusUrl: fmt.Sprintf("%s://%s%s", protocol, address, systemPath),
+		StatusPayload: SonyStatusPayload{
 			Method:  "getPowerStatus",
 			Id:      50,
 			Params:  []string{},
@@ -52,7 +58,7 @@ func New(protocol string, address string, psk string) *Tv {
 	}
 }
 
-func (t *Tv) GetStatus() string {
+func (t *SonyTv) GetStatus() Status {
 	jsonData, err := json.Marshal(t.StatusPayload)
 	if err != nil {
 		log.Fatalln(err)
@@ -61,21 +67,36 @@ func (t *Tv) GetStatus() string {
 	resp, err := http.Post(t.getStatusUrl, "application/json", bytes.NewBuffer(jsonData))
 
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return Off
 	}
 
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return Off
 	}
 
-	var response TvStatusResponse
+	var response SonyStatusResponse
 	err = json.Unmarshal(body, &response)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
+		return Off
 	}
 
-	return response.Result[0].Status
+	status := response.Result[0].Status
+
+	if status == "standby" {
+		return StandBy
+	} else if status == "active" {
+		return Active
+	} else {
+		return Off
+	}
+}
+
+func (t *SonyTv) GetAddress() string {
+	return t.Address
 }
