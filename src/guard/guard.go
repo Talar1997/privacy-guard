@@ -1,9 +1,10 @@
-package main
+package guard
 
 import (
 	"log"
 	"privacy-guard/src/blocker"
 	"privacy-guard/src/tv"
+	"time"
 )
 
 func Watch(t tv.Tv, b blocker.Blocker, s Sleeper) {
@@ -47,4 +48,22 @@ func WatchInLoop(t tv.Tv, b blocker.Blocker, s Sleeper, initialStatus tv.Status)
 			s.Sleep()
 		}
 	}
+}
+
+type Sleeper interface {
+	Sleep()
+	Stop() bool
+}
+
+type DefaultSleeper struct {
+	Duration int
+	Break    bool
+}
+
+func (d *DefaultSleeper) Sleep() {
+	time.Sleep(time.Duration(d.Duration) * time.Second)
+}
+
+func (d *DefaultSleeper) Stop() bool {
+	return d.Break
 }

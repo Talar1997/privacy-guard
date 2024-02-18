@@ -5,9 +5,9 @@ import (
 	"net/url"
 	"os"
 	"strconv"
-	"time"
 
 	"privacy-guard/src/blocker"
+	"privacy-guard/src/guard"
 	"privacy-guard/src/tv"
 
 	"github.com/joho/godotenv"
@@ -37,44 +37,26 @@ func main() {
 
 	sonyTv := tv.NewSony(tvUrl)
 	adguard := blocker.NewAdguard(adguardUrl, adguardUsername, adguardPassword)
-	sleeper := &DefaultSleeper{
+	sleeper := &guard.DefaultSleeper{
 		Duration: interval,
 		Break:    false,
 	}
 
-	Watch(sonyTv, adguard, sleeper)
+	guard.Watch(sonyTv, adguard, sleeper)
 }
 
 func getEnv(key string) string {
 
 	filename := ".env" //default env
-	if len(os.Args) > 2 {
+	if len(os.Args) > 1 {
 		filename = os.Args[1]
 	}
 
 	err := godotenv.Load(filename)
 
 	if err != nil {
-		log.Printf("Error loading %s file. \n", filename)
+		log.Printf("Error while reading %s key from file, %s. Error: %s", key, filename, err)
 	}
 
 	return os.Getenv(key)
-}
-
-type Sleeper interface {
-	Sleep()
-	Stop() bool
-}
-
-type DefaultSleeper struct {
-	Duration int
-	Break    bool
-}
-
-func (d *DefaultSleeper) Sleep() {
-	time.Sleep(time.Duration(d.Duration) * time.Second)
-}
-
-func (d *DefaultSleeper) Stop() bool {
-	return d.Break
 }
