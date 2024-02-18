@@ -19,24 +19,24 @@ func TestNewSony(t *testing.T) {
 }
 
 func TestGetStatus(t *testing.T) {
-	server := makeTvServer("standby")
-	tvUrl, _ := url.Parse(server.URL)
+	standByServer := makeTvServer("standby")
+	tvUrl, _ := url.Parse(standByServer.URL)
 
 	tvSony := NewSony(tvUrl)
 	status := tvSony.GetStatus()
 	if status != StandBy {
 		t.Errorf("Expected %d to be %d", status, StandBy)
 	}
-	server.Close()
+	defer standByServer.Close()
 
-	server = makeTvServer("active")
-
+	activeServer := makeTvServer("active")
+	tvUrl, _ = url.Parse(activeServer.URL)
 	tvSony = NewSony(tvUrl)
 	status = tvSony.GetStatus()
 	if status != Active {
 		t.Errorf("Expected %d to be %d", status, StandBy)
 	}
-	server.Close()
+	defer activeServer.Close()
 
 	tvUrl, _ = url.Parse("http://localhost:2137")
 	tvSony = NewSony(tvUrl)
