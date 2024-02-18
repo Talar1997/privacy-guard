@@ -22,7 +22,7 @@ jobs:
         go-version: '1.21.6'
 
     - name: Build
-      run: go build -v ./src/main.go
+      run: go build -v ./src/
 
-    # - name: Test
-    #   run: go test -v ./...
+    - name: Test
+      run: go test -v ./src/...

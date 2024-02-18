@@ -13,12 +13,10 @@ import (
 )
 
 type Adguard struct {
-	Protocol           string
-	Address            string
-	Credentials        string
-	filteringRulesPath string
-	setRulesPath       string
-	blockingRule       string
+	Url         *url.URL
+	getRulesUrl *url.URL
+	setRulesUrl *url.URL
+	Credentials string
 }
 
 type UpdateStatus int
@@ -28,71 +26,55 @@ const (
 	Fail
 )
 
-// https://github.com/AdguardTeam/AdGuardHome/tree/master/openapi
-func New(protocol string, address string, username string, password string) *Adguard {
-	adguardCredentials := fmt.Sprintf("%s:%s", username, password)
-
-	_, err := url.Parse(fmt.Sprintf("%s://%s", protocol, address))
-	if err != nil {
-		log.Fatalln("Invalid adguard URL")
-	}
-
-	return &Adguard{
-		Protocol:           protocol,
-		Address:            address,
-		Credentials:        base64.StdEncoding.EncodeToString([]byte(adguardCredentials)),
-		filteringRulesPath: "/control/filtering/status",
-		setRulesPath:       "/control/filtering/set_rules",
-		blockingRule:       "||*^$client=", // Block every request from client
-	}
+type RulesResponse struct {
+	UserRules []string `json:"user_rules"`
 }
 
-func (a *Adguard) GetRules() []string {
-	adguardRulesUrl := fmt.Sprintf("%s://%s%s", a.Protocol, a.Address, a.filteringRulesPath)
-	req, err := http.NewRequest("GET", adguardRulesUrl, nil)
-	if err != nil {
-		log.Fatalln(err)
+type RulesPayload struct {
+	Rules []string `json:"rules"`
+}
+
+const getRulesPath = "/control/filtering/status"
+const setRulesPath = "/control/filtering/set_rules"
+const blockRule = "||*^$client="
+
+// https://github.com/AdguardTeam/AdGuardHome/tree/master/openapi
+func NewAdguard(u *url.URL, username string, password string) *Adguard {
+	adguardCredentials := fmt.Sprintf("%s:%s", username, password)
+
+	return &Adguard{
+		Url:         u,
+		getRulesUrl: u.JoinPath(getRulesPath),
+		setRulesUrl: u.JoinPath(setRulesPath),
+		Credentials: base64.StdEncoding.EncodeToString([]byte(adguardCredentials)),
 	}
-
-	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", a.Credentials))
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-
-	if err != nil {
-		log.Fatalln(err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	var response RulesResponse
-	err = json.Unmarshal(body, &response)
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	return response.UserRules
 }
 
 func (a *Adguard) SetRule(tvAddress string) {
-	rule := fmt.Sprintf("%s%s", a.blockingRule, tvAddress)
+	rule := fmt.Sprintf("%s%s", blockRule, tvAddress)
 
-	userRules := a.GetRules()
+	userRules, err := a.getRules()
+	if err != nil {
+		log.Println("Couldn't set rule", err)
+		return
+	}
+
 	if !slices.Contains(userRules, rule) {
 		log.Printf("Setting rule: %s \n", rule)
 		userRules = append(userRules, rule)
-		a.UpdateRules(userRules)
+		a.updateRules(userRules)
 	}
 }
 
 func (a *Adguard) RemoveRule(tvAddress string) {
-	existingRule := fmt.Sprintf("%s%s", a.blockingRule, tvAddress)
+	existingRule := fmt.Sprintf("%s%s", blockRule, tvAddress)
 
-	userRules := a.GetRules()
+	userRules, err := a.getRules()
+	if err != nil {
+		log.Println("Couldn't remove rule", err)
+		return
+	}
+
 	if slices.Contains(userRules, existingRule) {
 		log.Printf("Removing rule: %s \n", existingRule)
 
@@ -103,20 +85,50 @@ func (a *Adguard) RemoveRule(tvAddress string) {
 			}
 		}
 
-		a.UpdateRules(updatedRules)
+		a.updateRules(updatedRules)
 	}
 }
 
-func (a *Adguard) UpdateRules(rules []string) UpdateStatus {
-	adguardSetRulesUrl := fmt.Sprintf("%s://%s%s", a.Protocol, a.Address, a.setRulesPath)
+func (a *Adguard) getRules() ([]string, error) {
+	req, err := http.NewRequest("GET", a.getRulesUrl.String(), nil)
+	if err != nil {
+		return []string{}, err
+	}
+
+	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", a.Credentials))
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+
+	if err != nil {
+		return []string{}, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return []string{}, err
+	}
+
+	var response RulesResponse
+	err = json.Unmarshal(body, &response)
+	if err != nil {
+		return []string{}, err
+	}
+
+	return response.UserRules, nil
+}
+
+func (a *Adguard) updateRules(rules []string) (UpdateStatus, error) {
 	payload := &RulesPayload{
 		Rules: rules,
 	}
 	payloadStr, _ := json.Marshal(payload)
 
-	req, err := http.NewRequest("POST", adguardSetRulesUrl, bytes.NewBuffer(payloadStr))
+	req, err := http.NewRequest("POST", a.setRulesUrl.String(), bytes.NewBuffer(payloadStr))
 	if err != nil {
-		log.Fatalln(err)
+		log.Println("Update failed", err)
+		return Fail, err
 	}
 
 	req.Header.Set("Authorization", fmt.Sprintf("Basic %s", a.Credentials))
@@ -126,21 +138,14 @@ func (a *Adguard) UpdateRules(rules []string) UpdateStatus {
 	resp, err := client.Do(req)
 
 	if err != nil {
-		log.Printf("Cannot update rules, something went wrong: %s", err)
+		log.Println("Update failed", err)
+		return Fail, err
 	}
-	defer resp.Body.Close()
+	resp.Body.Close()
 
 	if resp.StatusCode == 200 {
-		return Success
+		return Success, nil
 	} else {
-		return Fail
+		return Fail, nil
 	}
-}
-
-type RulesResponse struct {
-	UserRules []string `json:"user_rules"`
-}
-
-type RulesPayload struct {
-	Rules []string `json:"rules"`
 }

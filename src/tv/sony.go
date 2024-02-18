@@ -3,7 +3,6 @@ package tv
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -27,35 +26,32 @@ type SonyResult struct {
 }
 
 type SonyTv struct {
-	Protocol      string
-	Address       string
-	Psk           string
-	SystemPath    string
-	getStatusUrl  string
+	Url           *url.URL
+	statusUrl     *url.URL
 	StatusPayload SonyStatusPayload
 }
 
-func New(protocol string, address string, psk string) *SonyTv {
-	systemPath := "/sony/system"
+const systemPath = "/sony/system"
+const method = "getPowerStatus"
+const id = 50
+const version = "1.0"
 
-	_, err := url.Parse(fmt.Sprintf("%s://%s", protocol, address))
-	if err != nil {
-		log.Fatalln("Invalid SonyTV URL")
-	}
+// https://pro-bravia.sony.net/develop/index.html
+func NewSony(u *url.URL) *SonyTv {
+	statusUrl := u.JoinPath(systemPath)
 
-	return &SonyTv{
-		Protocol:     protocol,
-		Address:      address,
-		Psk:          psk,
-		SystemPath:   systemPath,
-		getStatusUrl: fmt.Sprintf("%s://%s%s", protocol, address, systemPath),
+	sonyTv := &SonyTv{
+		Url:       u,
+		statusUrl: statusUrl,
 		StatusPayload: SonyStatusPayload{
-			Method:  "getPowerStatus",
-			Id:      50,
+			Method:  method,
+			Id:      id,
 			Params:  []string{},
-			Version: "1.0",
+			Version: version,
 		},
 	}
+
+	return sonyTv
 }
 
 func (t *SonyTv) GetStatus() Status {
@@ -64,13 +60,12 @@ func (t *SonyTv) GetStatus() Status {
 		log.Fatalln(err)
 	}
 
-	resp, err := http.Post(t.getStatusUrl, "application/json", bytes.NewBuffer(jsonData))
+	resp, err := http.Post(t.statusUrl.String(), "application/json", bytes.NewBuffer(jsonData))
 
 	if err != nil {
 		log.Println(err)
 		return Off
 	}
-
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
@@ -86,17 +81,16 @@ func (t *SonyTv) GetStatus() Status {
 		return Off
 	}
 
-	status := response.Result[0].Status
-
-	if status == "standby" {
+	switch status := response.Result[0].Status; status {
+	case "standby":
 		return StandBy
-	} else if status == "active" {
+	case "active":
 		return Active
-	} else {
+	default:
 		return Off
 	}
 }
 
 func (t *SonyTv) GetAddress() string {
-	return t.Address
+	return t.Url.Host
 }

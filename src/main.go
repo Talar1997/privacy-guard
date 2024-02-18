@@ -2,8 +2,10 @@ package main
 
 import (
 	"log"
+	"net/url"
 	"os"
 	"strconv"
+	"time"
 
 	"privacy-guard/src/blocker"
 	"privacy-guard/src/tv"
@@ -13,20 +15,34 @@ import (
 
 func main() {
 	log.Println("Privacy Guard started")
-	tvProtocol, tvAddress, tvPsk := getEnv("TV_PROTOCOL"), getEnv("TV_ADDRESS"), getEnv("TV_PSK")
-	adguardProtocol, adguardAddress := getEnv("ADGUARD_PROTOCOL"), getEnv("ADGUARD_ADDRESS")
-	adguardUsername, adguardPassword := getEnv("ADGUARD_USERNAME"), getEnv("ADGUARD_PASSWORD")
-	interval, err := strconv.Atoi(getEnv("INTERVAL"))
+	tvUrlStr := getEnv("TV_ADDRESS")
+	tvUrl, err := url.Parse(tvUrlStr)
+	if err != nil {
+		log.Fatalln("Invalid TV URL", err)
+	}
 
+	adguardUsername, adguardPassword := getEnv("ADGUARD_USERNAME"), getEnv("ADGUARD_PASSWORD")
+	adguardUrlStr := getEnv("ADGUARD_ADDRESS")
+	adguardUrl, err := url.Parse(adguardUrlStr)
+	if err != nil {
+		log.Fatalln("Invalid adguard URL", err)
+	}
+
+	intervalStr := getEnv("INTERVAL")
+	interval, err := strconv.Atoi(intervalStr)
 	if err != nil {
 		log.Fatalln("Interval value must be integer, setting defualt value (2 sec)")
 		interval = 2
 	}
 
-	sonyTv := tv.New(tvProtocol, tvAddress, tvPsk)
-	adguard := blocker.New(adguardProtocol, adguardAddress, adguardUsername, adguardPassword)
+	sonyTv := tv.NewSony(tvUrl)
+	adguard := blocker.NewAdguard(adguardUrl, adguardUsername, adguardPassword)
+	sleeper := &DefaultSleeper{
+		Duration: interval,
+		Break:    false,
+	}
 
-	Watch(sonyTv, adguard, interval)
+	Watch(sonyTv, adguard, sleeper)
 }
 
 func getEnv(key string) string {
@@ -43,4 +59,22 @@ func getEnv(key string) string {
 	}
 
 	return os.Getenv(key)
+}
+
+type Sleeper interface {
+	Sleep()
+	Stop() bool
+}
+
+type DefaultSleeper struct {
+	Duration int
+	Break    bool
+}
+
+func (d *DefaultSleeper) Sleep() {
+	time.Sleep(time.Duration(d.Duration) * time.Second)
+}
+
+func (d *DefaultSleeper) Stop() bool {
+	return d.Break
 }
